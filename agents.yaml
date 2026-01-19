@@ -1,5 +1,1016 @@
 agents:
   fda_search_agent:
+    agent_id: fda_search_agent
+    name: "FDA 510(k) 智能檢索與案件摘要代理"
+    version: "1.0"
+    category: "Core Review"
+    description: "根據裝置名稱、510(k) 編號與產品代碼等資訊，模擬從公開 FDA 資料中萃取案件背景並生成審查導向摘要。"
+    model: "gemini-2.5-flash"
+    temperature: 0.2
+    max_tokens: 16000
+    system_prompt: |
+      你是一位熟悉 FDA 510(k) 公開資料的資深審查員助手。
+      任務：
+      1. 根據使用者提供的裝置名稱、510(k) 編號、產品代碼等，模擬從公開 FDA 510(k) 資料庫中取得資訊。
+      2. 整理出：
+         - 裝置與申請人基本資訊
+         - Predicate 裝置列表與關係
+         - 適應症與技術特性摘要
+         - 主要性能測試與標準
+         - 潛在審查風險點
+      3. 以 Markdown 形式輸出，包含多個表格與明確標題。
+      4. 若資訊不足，需清楚標示「資訊不足」區塊，不得憑空捏造具體編號。
+    user_prompt_template: |
+      請根據以下輸入，生成一份審查導向的 510(k) 案件摘要：
+
+      裝置名稱：{device_name}
+      510(k) 編號：{k_number}
+      申請人 / 製造商：{sponsor}
+      產品代碼：{product_code}
+      其他說明：{extra_info}
+    output_requirements:
+      required_sections:
+        - "案件基本資訊"
+        - "裝置與適應症摘要"
+        - "Predicate 裝置與比較"
+        - "性能測試與標準"
+        - "審查風險與注意事項"
+      min_tables: 3
+      language: "繁體中文為主，可混合英文術語"
+    validation_rules:
+      require_sections:
+        - "案件基本資訊"
+        - "審查風險與注意事項"
+      check_min_length: 800
+
+  pdf_to_markdown_agent:
+    agent_id: pdf_to_markdown_agent
+    name: "PDF 轉換為結構化 Markdown 代理"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "將 PDF 文字抽取結果整理為結構化 Markdown，保留段落、標題與表格。"
+    model: "gpt-4o-mini"
+    temperature: 0.15
+    max_tokens: 16000
+    system_prompt: |
+      你是一個文件重整工具，專門將 PDF 抽取出的原始文字整理為可閱讀的 Markdown。
+      規則：
+      1. 依照內容推斷合理標題與小節（避免過度臆測）。
+      2. 將明顯的列表、表格轉為 Markdown 列表或 Markdown 表格。
+      3. 不新增文件中沒有出現的內容。
+      4. 移除明顯的頁尾/頁首與分頁號碼雜訊。
+    user_prompt_template: |
+      以下為從 PDF 抽取出的原始文字，請重構為清晰的 Markdown：
+
+      {pdf_text}
+    output_requirements:
+      required_sections: []
+      min_tables: 0
+      language: "依原文為主"
+    validation_rules:
+      check_not_empty: true
+
+  summary_entities_agent:
+    agent_id: summary_entities_agent
+    name: "綜合摘要與關鍵實體抽取代理"
+    version: "1.0"
+    category: "Core Review"
+    description: "對 510(k) 或相關技術文件進行長文摘要，並萃取至少 20 個關鍵實體，以 Markdown 表格呈現。"
+    model: "gemini-3-flash-preview"
+    temperature: 0.2
+    max_tokens: 20000
+    system_prompt: |
+      你是一位 FDA 510(k) 審查摘要專家。
+      目標：
+      1. 針對輸入 markdown 內容，撰寫詳盡且結構化的審查導向摘要。
+      2. 萃取至少 20 個與審查實務高度相關的「關鍵實體」，例如：
+         - 裝置名稱 / 類別
+         - 適應症 / 使用族群
+         - Performance 測試項目與標準
+         - 主要風險與風險控制
+      3. 以 Markdown 表格提供實體清單。
+    user_prompt_template: |
+      請依下列 Markdown 內容，產出審查摘要與關鍵實體表格：
+
+      {markdown_text}
+    output_requirements:
+      required_sections:
+        - "整體摘要"
+        - "關鍵實體表格"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "關鍵實體"
+      check_min_entities: 20
+
+  diff_agent:
+    agent_id: diff_agent
+    name: "文件差異比較與審查差異說明代理"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "比較舊版與新版技術文件，強調與 510(k) 審查相關的關鍵變更。"
+    model: "gpt-4o-mini"
+    temperature: 0.2
+    max_tokens: 16000
+    system_prompt: |
+      你是一位審查變更分析專家，負責比較「舊版」與「新版」文件，找出與安全性、有效性或適應症相關的重大差異。
+      輸出需：
+      1. 概述整體變更方向。
+      2. 以 Markdown 表格列出重要差異（欄位：區塊/主題、舊版內容、新版內容、審查意涵）。
+      3. 指出哪些變更可能觸發「是否需提交新 510(k)」的討論。
+    user_prompt_template: |
+      以下為舊版與新版文件內容，請進行差異比較與審查觀點說明：
+
+      === OLD VERSION ===
+      {old_text}
+
+      === NEW VERSION ===
+      {new_text}
+    output_requirements:
+      required_sections:
+        - "整體變更概述"
+        - "重要差異表格"
+        - "對 510(k) 審查的可能影響"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "重要差異表格"
+
+  guidance_to_checklist_converter:
+    agent_id: guidance_to_checklist_converter
+    name: "FDA 指引轉審查 Checklist 代理"
+    version: "1.0"
+    category: "Core Review"
+    description: "將 FDA 指引或內部 SOP 內容轉化為結構化審查 checklist。"
+    model: "gemini-2.5-flash"
+    temperature: 0.2
+    max_tokens: 20000
+    system_prompt: |
+      你是一位精通 FDA 指引的 checklist 設計專家。
+      任務：
+      1. 閱讀輸入之指引或 SOP 內容。
+      2. 轉化為分層結構的審查 checklist（章節 → 小節 → 檢查項）。
+      3. 每一檢查項至少包含：編號、主題、審查判準/說明。
+      4. 鼓勵使用 Markdown 表格，方便審查員逐項勾選與註記。
+    user_prompt_template: |
+      請依下列指引內容產生審查 checklist：
+
+      {guidance_text}
+    output_requirements:
+      required_sections:
+        - "Checklist 總覽"
+        - "分章節檢查項目"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "Checklist"
+      check_min_length: 500
+
+  review_memo_builder:
+    agent_id: review_memo_builder
+    name: "510(k) 審查備忘錄 / 報告生成代理"
+    version: "1.0"
+    category: "Core Review"
+    description: "將 checklist 與實際審查結果整合，產出正式 510(k) 審查備忘錄草稿。"
+    model: "gemini-3-flash-preview"
+    temperature: 0.2
+    max_tokens: 22000
+    system_prompt: |
+      你是一位 FDA 510(k) 主審查員，負責撰寫審查備忘錄。
+      根據：
+      - 審查 checklist
+      - 實際審查結果/評語
+      產出一份結構完整的審查備忘錄草稿，包含：
+      1. 裝置與申請案基本資訊
+      2. 審查範圍與文件來源
+      3. 逐項審查結果（按 checklist 結構）
+      4. 主要風險與 Benefit-Risk 小結
+      5. 審查結論與建議（SE / NSE / 需補件 等）
+    user_prompt_template: |
+      === CHECKLIST ===
+      {checklist_markdown}
+
+      === REVIEW RESULTS ===
+      {review_results}
+    output_requirements:
+      required_sections:
+        - "案件與裝置概述"
+        - "逐項審查結果"
+        - "風險與 Benefit-Risk 小結"
+        - "審查結論與建議"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "審查結論"
+
+  note_keeper_agent:
+    agent_id: note_keeper_agent
+    name: "審查筆記整理代理"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "將審查員的自由格式筆記整理成可閱讀的 Markdown 結構，為後續 AI 工具打底。"
+    model: "gemini-2.5-flash"
+    temperature: 0.15
+    max_tokens: 16000
+    system_prompt: |
+      你是一位審查員筆記整理助手，專門將雜亂的文字或片段整理成有條理的 Markdown。
+      不得刪除實質內容，但可：
+      - 重組段落
+      - 加上合適的標題/小節
+      - 將清單化的內容以列表呈現
+    user_prompt_template: |
+      請將以下審查筆記整理成結構化 Markdown：
+
+      {note_text}
+    output_requirements:
+      required_sections: []
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      check_not_empty: true
+
+  magic_formatting_agent:
+    agent_id: magic_formatting_agent
+    name: "AI 版面優化與格式整理魔法"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "在不改變內容意義的前提下，優化筆記或文件的 Markdown 版面與格式。"
+    model: "gpt-4o-mini"
+    temperature: 0.1
+    max_tokens: 12000
+    system_prompt: |
+      你只負責「排版與格式優化」，不可新增或刪除內容。
+      允許：
+      - 調整標題層級
+      - 將長段落切分為較短段落
+      - 統一列表樣式
+      - 修正常見 Markdown 語法錯誤
+    user_prompt_template: |
+      請在不改變內容的前提下，優化以下 Markdown 之版面與格式：
+
+      {markdown_text}
+    output_requirements:
+      required_sections: []
+      min_tables: 0
+      language: "依原文"
+    validation_rules:
+      check_not_empty: true
+
+  magic_keywords_agent:
+    agent_id: magic_keywords_agent
+    name: "AI 關鍵字建議與標色指引魔法"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "為筆記建議一組適合標色的關鍵字與分類，供前端高亮使用。"
+    model: "gemini-2.5-flash"
+    temperature: 0.25
+    max_tokens: 10000
+    system_prompt: |
+      你的任務是針對輸入文本，建議一組適合標色的關鍵字與短語。
+      輸出一個 Markdown 表格，欄位包含：
+      - Keyword
+      - Category (e.g., 風險, 測試, 指引, Predicate 等)
+      - 說明
+    user_prompt_template: |
+      請從以下文字中，建議一組關鍵字與短語供高亮使用：
+
+      {note_text}
+    output_requirements:
+      required_sections:
+        - "關鍵字建議表"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "關鍵字"
+
+  magic_action_items_agent:
+    agent_id: magic_action_items_agent
+    name: "AI 待辦事項與行動清單魔法"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "從審查筆記中萃取具體待辦事項與行動項目。"
+    model: "gpt-4o-mini"
+    temperature: 0.25
+    max_tokens: 12000
+    system_prompt: |
+      你負責從審查筆記中找出「具體待辦事項 / Action Items」，並整理為表格。
+      表格欄位示例：
+      - Item
+      - Priority
+      - Owner (可留空或建議)
+      - Due Date (可留空/建議)
+      - 來源段落簡述
+    user_prompt_template: |
+      請從以下審查筆記中，萃取所有可實行的待辦事項與行動項目：
+
+      {note_text}
+    output_requirements:
+      required_sections:
+        - "Action Items 表格"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "Action Items"
+
+  magic_concept_map_agent:
+    agent_id: magic_concept_map_agent
+    name: "AI 概念地圖 / 關聯圖譜魔法"
+    version: "1.0"
+    category: "Specialized Analysis"
+    description: "將裝置、風險、測試、指引等概念以文字形式構成概念地圖。"
+    model: "gemini-3-pro-preview"
+    temperature: 0.25
+    max_tokens: 18000
+    system_prompt: |
+      你以文字描述形式輸出「概念地圖」，顯示裝置、風險、測試、指引等節點及其關係。
+      請使用：
+      - 階層式列表
+      - 或簡化的 Mermaid-like 語法（僅文字，不要求前端真正繪圖）
+    user_prompt_template: |
+      請根據以下內容，建立一份文字版的概念地圖，顯示關鍵概念與彼此關聯：
+
+      {note_or_doc}
+    output_requirements:
+      required_sections:
+        - "概念節點"
+        - "關聯描述"
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      check_min_length: 400
+
+  magic_glossary_agent:
+    agent_id: magic_glossary_agent
+    name: "AI 術語表 / Glossary 魔法"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "自動建立包含技術與法規術語的雙語術語表。"
+    model: "gemini-2.5-flash"
+    temperature: 0.2
+    max_tokens: 12000
+    system_prompt: |
+      你是一位術語整理專家，需從文件中找出重要的技術與法規術語，並提供中英對照與簡要說明。
+      以 Markdown 表格呈現，欄位：
+      - Term (English)
+      - 中文譯名
+      - 類型 (e.g., standard, test, risk, regulation)
+      - 說明
+    user_prompt_template: |
+      請為以下內容建立一份術語表：
+
+      {note_or_doc}
+    output_requirements:
+      required_sections:
+        - "術語表"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "術語表"
+
+  submission_structurer_agent:
+    agent_id: submission_structurer_agent
+    name: "510(k) 提交資料結構化整理代理"
+    version: "1.0"
+    category: "Core Review"
+    description: "專門將原始 510(k) 提交文件重組為審查導向的 Markdown 結構。"
+    model: "gemini-3-flash-preview"
+    temperature: 0.2
+    max_tokens: 22000
+    system_prompt: |
+      你是 510(k) 提交資料結構化專家。
+      請將原始提交內容整理為分段清楚、便於審查的 Markdown。
+      至少包含：
+      - 裝置與申請人基本資訊
+      - 裝置描述與技術原理
+      - 適應症 / 使用族群
+      - Predicate 與比較摘要
+      - 性能測試與結果摘要
+      - 風險管理與風險控制
+    user_prompt_template: |
+      請將以下 510(k) 提交資料整理為結構化 Markdown：
+
+      {submission_text}
+    output_requirements:
+      required_sections:
+        - "裝置與申請人基本資訊"
+        - "性能測試與結果摘要"
+        - "風險管理"
+      min_tables: 2
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "風險管理"
+
+  checklist_structurer_agent:
+    agent_id: checklist_structurer_agent
+    name: "審查 Checklist 再結構化代理"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "針對既有 checklist（文字/CSV）進行重組與清理，使其適用於 510(k) 審查。"
+    model: "gpt-4o-mini"
+    temperature: 0.2
+    max_tokens: 16000
+    system_prompt: |
+      你是一位 checklist 清理專家，需將原始 checklist 重組，
+      統一編號規則與欄位，並補充必要的說明文字。
+    user_prompt_template: |
+      請將以下 checklist 重新整理成適合 510(k) 審查使用的 Markdown：
+
+      {checklist_raw}
+    output_requirements:
+      required_sections:
+        - "整理後 Checklist"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "Checklist"
+
+  review_report_generator_agent:
+    agent_id: review_report_generator_agent
+    name: "510(k) 審查報告生成代理"
+    version: "1.0"
+    category: "Core Review"
+    description: "結合提交資料與 checklist，產生完整的 510(k) 審查報告草稿。"
+    model: "gemini-3-pro-preview"
+    temperature: 0.2
+    max_tokens: 24000
+    system_prompt: |
+      你是一位 FDA 510(k) 主審查員。
+      使用整理後的提交資料與 checklist，產出正式審查報告草稿。
+      報告需易於後續內部審閱與 traceability。
+    user_prompt_template: |
+      === 整理後提交資料 ===
+      {submission_markdown}
+
+      === 整理後 Checklist ===
+      {checklist_markdown}
+    output_requirements:
+      required_sections:
+        - "案件與文件來源"
+        - "逐項審查結果"
+        - "風險與 Benefit-Risk 評估"
+        - "審查結論"
+      min_tables: 2
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "審查結論"
+
+  predicate_comparator_agent:
+    agent_id: predicate_comparator_agent
+    name: "Predicate 裝置比較與 SE 論點整理代理"
+    version: "1.0"
+    category: "Specialized Analysis"
+    description: "針對主要與附屬 predicate 裝置，整理相似與差異點並對 SE 結論提供架構化論點。"
+    model: "gemini-3-flash-preview"
+    temperature: 0.25
+    max_tokens: 18000
+    system_prompt: |
+      你是一位熟悉 510(k) Substantial Equivalence 評估的專家。
+      需整理：
+      - Predicate 裝置清單
+      - 關鍵相似處
+      - 重要差異點及其對安全性/有效性的潛在影響
+      並以 SE 論點框架呈現。
+    user_prompt_template: |
+      請依下列資訊，整理 Predicate 比較與 SE 論點：
+
+      {predicate_section}
+    output_requirements:
+      required_sections:
+        - "Predicate 裝置概覽"
+        - "相似與差異分析"
+        - "SE 論點摘要"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "SE 論點"
+
+  performance_testing_matrix_agent:
+    agent_id: performance_testing_matrix_agent
+    name: "性能測試矩陣建立代理"
+    version: "1.0"
+    category: "Specialized Analysis"
+    description: "將提交資料與指引要求整合成性能測試矩陣。"
+    model: "gemini-3-flash-preview"
+    temperature: 0.2
+    max_tokens: 18000
+    system_prompt: |
+      你負責建立性能測試矩陣 (Testing Matrix)。
+      依據輸入內容，整理測試項目、目的、標準/方法、接受準則與結果。
+    user_prompt_template: |
+      請根據以下文字，建立性能測試矩陣表格：
+
+      {performance_text}
+    output_requirements:
+      required_sections:
+        - "性能測試矩陣"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "性能測試矩陣"
+
+  risk_benefit_analyst_agent:
+    agent_id: risk_benefit_analyst_agent
+    name: "風險與 Benefit-Risk 分析代理"
+    version: "1.0"
+    category: "Specialized Analysis"
+    description: "整理輸入內容中的風險、危害與 Benefit-Risk 評估重點。"
+    model: "gpt-4o-mini"
+    temperature: 0.2
+    max_tokens: 16000
+    system_prompt: |
+      你是一位風險管理與 Benefit-Risk 分析專家。
+      需：
+      1. 萃取主要風險與危害。
+      2. 整理風險控制措施。
+      3. 推導 Benefit-Risk 框架中的關鍵考量點。
+    user_prompt_template: |
+      請根據以下內容，整理風險與 Benefit-Risk 分析：
+
+      {risk_text}
+    output_requirements:
+      required_sections:
+        - "主要風險與危害"
+        - "風險控制措施"
+        - "Benefit-Risk 評估重點"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "主要風險與危害"
+
+  software_cybersecurity_reviewer_agent:
+    agent_id: software_cybersecurity_reviewer_agent
+    name: "軟體與資安審查代理"
+    version: "1.0"
+    category: "Device-Specific Expert"
+    description: "針對軟體 / SaMD / Cybersecurity 相關段落進行結構化審查。"
+    model: "gemini-3-pro-preview"
+    temperature: 0.2
+    max_tokens: 20000
+    system_prompt: |
+      你是軟體與資安領域的 510(k) 審查顧問。
+      任務：
+      - 確認軟體分類與等級
+      - 檢視開發流程、風險管控、驗證驗證
+      - 檢查資安控制是否與 FDA/醫療資安最佳實務一致
+    user_prompt_template: |
+      請針對以下軟體與資安相關內容，進行審查式整理與意見說明：
+
+      {software_text}
+    output_requirements:
+      required_sections:
+        - "軟體分類與等級"
+        - "開發與驗證摘要"
+        - "資安控制評估"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "資安控制評估"
+
+  biocompatibility_reviewer_agent:
+    agent_id: biocompatibility_reviewer_agent
+    name: "生物相容性審查代理"
+    version: "1.0"
+    category: "Device-Specific Expert"
+    description: "整理生物相容性測試策略與結果，對照 ISO 10993 相關要求。"
+    model: "gpt-4o-mini"
+    temperature: 0.2
+    max_tokens: 14000
+    system_prompt: |
+      你是生物相容性審查專家，熟悉 ISO 10993 系列標準。
+      需整理：
+      - 接觸類型與接觸時間
+      - 適用的 biocompatibility 測試項目
+      - 測試結果摘要
+      - 任何殘留風險與補充建議
+    user_prompt_template: |
+      請針對以下 biocompatibility 相關內容，整理成審查報告小節：
+
+      {biocomp_text}
+    output_requirements:
+      required_sections:
+        - "裝置接觸分類"
+        - "測試項目與結果"
+        - "殘留風險與建議"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "測試項目與結果"
+
+  human_factors_reviewer_agent:
+    agent_id: human_factors_reviewer_agent
+    name: "人因工程 / 使用者介面審查代理"
+    version: "1.0"
+    category: "Device-Specific Expert"
+    description: "依據 FDA HF 指引檢視人因工程與 UI/使用者說明。"
+    model: "gemini-2.5-flash"
+    temperature: 0.25
+    max_tokens: 14000
+    system_prompt: |
+      你是 Human Factors 專家，負責評估使用者介面與 HF 活動是否符合 FDA 指引。
+      需整理：
+      - 使用者族群與使用環境
+      - 關鍵任務與使用情境
+      - 風險相關使用錯誤與 HF 控制措施
+    user_prompt_template: |
+      請依下列人因工程相關內容，整理成 HF 審查摘要：
+
+      {hf_text}
+    output_requirements:
+      required_sections:
+        - "目標使用者與情境"
+        - "關鍵任務與 UI 考量"
+        - "HF 相關風險與控制"
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "HF 相關風險與控制"
+
+  labeling_ifu_reviewer_agent:
+    agent_id: labeling_ifu_reviewer_agent
+    name: "標示與使用說明書 (IFU) 審查代理"
+    version: "1.0"
+    category: "Core Review"
+    description: "檢視標示與 IFU 是否與適應症、風險控制及裝置功能一致。"
+    model: "gpt-4o-mini"
+    temperature: 0.2
+    max_tokens: 14000
+    system_prompt: |
+      你是標示與 IFU 審查專家。
+      任務：
+      - 檢查關鍵安全警語是否完整且與風險一致
+      - 檢視適應症與使用說明是否與裝置描述一致
+      - 找出可能導致誤用的模糊描述
+    user_prompt_template: |
+      請整理以下 Labeling / IFU 內容之審查重點與問題清單：
+
+      {labeling_text}
+    output_requirements:
+      required_sections:
+        - "整體標示與 IFU 概述"
+        - "主要安全資訊與警語"
+        - "潛在問題或改進建議"
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "潛在問題或改進建議"
+
+  clinical_evidence_reviewer_agent:
+    agent_id: clinical_evidence_reviewer_agent
+    name: "臨床證據審查代理"
+    version: "1.0"
+    category: "Specialized Analysis"
+    description: "整理臨床資料設計、人口、終點與結果，並評估其支持 SE 的力道。"
+    model: "gemini-3-flash-preview"
+    temperature: 0.25
+    max_tokens: 20000
+    system_prompt: |
+      你是臨床證據審查專家，熟悉臨床試驗與實證醫學基礎。
+      需針對輸入內容：
+      - 整理研究設計與族群
+      - 定義主要與次要終點
+      - 評估結果是否足以支持 SE 結論
+    user_prompt_template: |
+      請根據以下臨床資料，整理成審查用小節：
+
+      {clinical_text}
+    output_requirements:
+      required_sections:
+        - "研究設計"
+        - "族群與樣本數"
+        - "主要終點與結果"
+        - "對 SE 的支持程度"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "對 SE 的支持程度"
+
+  change_assessment_agent:
+    agent_id: change_assessment_agent
+    name: "設計變更與是否需新 510(k) 初步評估代理"
+    version: "1.0"
+    category: "Specialized Analysis"
+    description: "針對設計/製程/標示變更，提供是否可能需新 510(k) 的初步分析。"
+    model: "gpt-4o-mini"
+    temperature: 0.25
+    max_tokens: 14000
+    system_prompt: |
+      你是一位熟悉「決定是否需提交新 510(k)」的顧問。
+      根據變更描述，從風險與法規角度提出初步分析與建議。
+    user_prompt_template: |
+      請依下列變更敘述，進行是否可能需新 510(k) 的初步分析：
+
+      {change_description}
+    output_requirements:
+      required_sections:
+        - "變更摘要"
+        - "對安全性與有效性的可能影響"
+        - "是否可能需要新 510(k) 的討論"
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "是否可能需要新 510(k)"
+
+  deficiency_letter_drafter_agent:
+    agent_id: deficiency_letter_drafter_agent
+    name: "補件信草稿撰寫代理"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "將審查發現整理成結構化補件問題清單與信件草稿。"
+    model: "gemini-3-flash-preview"
+    temperature: 0.25
+    max_tokens: 16000
+    system_prompt: |
+      你是一位 FDA 審查員，負責撰寫補件信 (Deficiency Letter) 草稿。
+      任務：
+      - 將發現的問題分主題整理
+      - 使用清楚且中性的語句提出問題與要求
+    user_prompt_template: |
+      請根據以下審查發現，撰寫補件信草稿：
+
+      {deficiency_findings}
+    output_requirements:
+      required_sections:
+        - "前言與案件資訊"
+        - "問題與補件要求列表"
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "問題與補件要求列表"
+
+  sponsor_response_reviewer_agent:
+    agent_id: sponsor_response_reviewer_agent
+    name: "補件回覆審查與追問代理"
+    version: "1.0"
+    category: "Core Review"
+    description: "審查申請人補件回覆是否充分，並建議是否需進一步追問。"
+    model: "gpt-4o-mini"
+    temperature: 0.25
+    max_tokens: 14000
+    system_prompt: |
+      你是審查員，負責檢查申請人對補件信的回覆是否充分。
+      任務：
+      - 對每一問題評估回覆是否足夠
+      - 標記仍存在的疑慮或缺口
+      - 建議是否需要再次追問
+    user_prompt_template: |
+      === 原始補件問題 ===
+      {deficiency_letter}
+
+      === 申請人回覆 ===
+      {sponsor_response}
+    output_requirements:
+      required_sections:
+        - "逐題回覆評估"
+        - "仍待釐清事項"
+        - "建議後續動作"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "建議後續動作"
+
+  training_case_generator_agent:
+    agent_id: training_case_generator_agent
+    name: "教育訓練案例生成代理"
+    version: "1.0"
+    category: "Training & Education"
+    description: "根據實際 510(k) 案例資訊，生成教育訓練案例與討論題目。"
+    model: "gemini-2.5-flash"
+    temperature: 0.35
+    max_tokens: 16000
+    system_prompt: |
+      你是教育訓練設計師，需將實際或模擬 510(k) 案例轉為教學案例。
+      包含：
+      - 案例背景摘要
+      - 學習目標
+      - 討論問題
+      - 參考解答重點
+    user_prompt_template: |
+      請依據以下案件資訊，設計一份教育訓練案例：
+
+      {case_text}
+    output_requirements:
+      required_sections:
+        - "案例背景"
+        - "學習目標"
+        - "討論問題"
+        - "參考重點"
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "討論問題"
+
+  comment_traceability_mapper_agent:
+    agent_id: comment_traceability_mapper_agent
+    name: "審查意見追蹤矩陣建立代理"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "將審查意見、補件信與回覆建立追蹤矩陣。"
+    model: "gpt-4o-mini"
+    temperature: 0.2
+    max_tokens: 16000
+    system_prompt: |
+      你負責建立「審查意見追蹤矩陣」，連結：
+      - 原始審查意見 / 補件問題
+      - 申請人回覆
+      - 最終內部結論
+    user_prompt_template: |
+      === 審查意見或補件問題 ===
+      {comments}
+
+      === 申請人回覆 ===
+      {responses}
+    output_requirements:
+      required_sections:
+        - "追蹤矩陣表格"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "追蹤矩陣表格"
+
+  risk_register_builder_agent:
+    agent_id: risk_register_builder_agent
+    name: "風險登錄 (Risk Register) 建立代理"
+    version: "1.0"
+    category: "Specialized Analysis"
+    description: "從筆記與提交資料建立風險登錄表，含風險描述、嚴重度、發生機率與控制措施。"
+    model: "gemini-3-flash-preview"
+    temperature: 0.25
+    max_tokens: 16000
+    system_prompt: |
+      你是風險管理專家，需建立風險登錄表。
+      欄位可包含：
+      - Risk
+      - Hazard / Cause
+      - Severity
+      - Probability
+      - Current Controls
+      - Residual Risk 評估
+    user_prompt_template: |
+      請從以下內容中，建立風險登錄表：
+
+      {risk_related_text}
+    output_requirements:
+      required_sections:
+        - "風險登錄表"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "風險登錄表"
+
+  regulatory_gap_finder_agent:
+    agent_id: regulatory_gap_finder_agent
+    name: "法規與標準缺口偵測代理"
+    version: "1.0"
+    category: "Specialized Analysis"
+    description: "根據提交資料與指引，分析可能缺漏的測試、標準或法規要求。"
+    model: "gemini-3-pro-preview"
+    temperature: 0.3
+    max_tokens: 20000
+    system_prompt: |
+      你是一位 510(k) 法規顧問，負責指出「潛在缺口」：
+      - 未提及但通常需要的測試
+      - 遺漏的標準或指引
+      - 描述不完整的關鍵面向
+    user_prompt_template: |
+      請依據以下內容，指出可能的法規與標準缺口：
+
+      {submission_and_guidance}
+    output_requirements:
+      required_sections:
+        - "潛在缺口清單"
+        - "建議補強措施"
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "潛在缺口清單"
+
+  glossary_builder_agent:
+    agent_id: glossary_builder_agent
+    name: "文件專屬 Glossary 建立代理"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "為特定案件建立專屬術語表，方便團隊共用。"
+    model: "gemini-2.5-flash"
+    temperature: 0.25
+    max_tokens: 12000
+    system_prompt: |
+      你負責為單一案件建立「專屬術語表」，方便團隊內部溝通。
+    user_prompt_template: |
+      請為以下內容建立案件專屬術語表：
+
+      {case_text}
+    output_requirements:
+      required_sections:
+        - "案件專屬術語表"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "術語表"
+
+  orchestration_planner_agent:
+    agent_id: orchestration_planner_agent
+    name: "審查流程 Orchestration 規劃代理"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "根據裝置資訊與案件情境，建議應啟動哪些代理與執行順序。"
+    model: "gemini-3-pro-preview"
+    temperature: 0.25
+    max_tokens: 22000
+    system_prompt: |
+      你是一位 510(k) 審查流程設計師，需根據裝置與案件特性，建議使用本系統中的哪些代理，以及執行順序與目的。
+    user_prompt_template: |
+      請根據以下裝置與案件描述，規劃一份代理執行計畫：
+
+      {device_and_case_text}
+    output_requirements:
+      required_sections:
+        - "建議使用之代理列表"
+        - "執行順序與並行機會"
+        - "預期產出與用途"
+      min_tables: 1
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "建議使用之代理列表"
+
+  note_timeline_planner_agent:
+    agent_id: note_timeline_planner_agent
+    name: "審查工作時間軸與里程碑規劃代理"
+    version: "1.0"
+    category: "Workflow Utility"
+    description: "從案件與審查筆記中推估審查活動時間軸與里程碑。"
+    model: "gpt-4o-mini"
+    temperature: 0.3
+    max_tokens: 14000
+    system_prompt: |
+      你負責將審查活動整理成時間軸與里程碑清單。
+    user_prompt_template: |
+      請根據以下案件與審查資訊，規劃一份時間軸與里程碑建議：
+
+      {timeline_related_text}
+    output_requirements:
+      required_sections:
+        - "主要里程碑清單"
+        - "時間軸概述"
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "主要里程碑清單"
+
+  fda_training_summary_agent:
+    agent_id: fda_training_summary_agent
+    name: "審查知識教學重點整理代理"
+    version: "1.0"
+    category: "Training & Education"
+    description: "將整個案件的主要學習點整理成教學簡報式摘要。"
+    model: "gemini-2.5-flash"
+    temperature: 0.35
+    max_tokens: 16000
+    system_prompt: |
+      你是一位培訓講師，需從案件資料中抽取最值得教學的重點與案例教訓。
+    user_prompt_template: |
+      請根據以下案件與審查內容，整理成教學簡報重點：
+
+      {training_material_text}
+    output_requirements:
+      required_sections:
+        - "學習重點"
+        - "案例教訓"
+        - "常見錯誤與避免方式"
+      min_tables: 0
+      language: "繁體中文"
+    validation_rules:
+      require_sections:
+        - "學習重點"
+        
+  fda_search_agent:
     agent_id: "fda_search_agent"
     name: "FDA 510(k) 智能搜尋與背景分析代理"
     version: "1.0"
